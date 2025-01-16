@@ -57,7 +57,7 @@ class COCOeval:
     # Data, paper, and tutorials available at:  http://mscoco.org/
     # Code written by Piotr Dollar and Tsung-Yi Lin, 2015.
     # Licensed under the Simplified BSD License [see coco/license.txt]
-    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm'):
+    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm', img_dir=None):
         '''
         Initialize CocoEval using coco APIs for gt and dt
         :param cocoGt: coco object with ground truth annotations
@@ -69,7 +69,7 @@ class COCOeval:
             print('iouType not specified. use default iouType segm')
         self.cocoGt   = cocoGt              # ground truth COCO API
         self.cocoDt   = cocoDt              # detections COCO API
-        self.evalImgs = defaultdict(list)   # per-image per-category evaluation results [KxAxI] elements
+        self.evalImgs = []                  # per-image per-category evaluation results
         self.eval     = {}                  # accumulated evaluation results
         self._gts = defaultdict(list)       # gt for evaluation
         self._dts = defaultdict(list)       # dt for evaluation
@@ -81,6 +81,156 @@ class COCOeval:
             self.params.imgIds = sorted(cocoGt.getImgIds())
             self.params.catIds = sorted(cocoGt.getCatIds())
 
+        self.img_dir = img_dir
+        self.debug_vis = True
+        self.vis_buffer = defaultdict(list)  # Buffer for visualization results
+
+        # Import visualization libraries
+        import cv2
+        import os
+        self.cv2 = cv2
+        self.os = os
+
+    def _visualize_debug(self, eval_imgs):
+        """
+        Create debug visualizations after evaluation, showing detections averaged across IoU range [0.50:0.95]
+        """
+        if not self.debug_vis or self.img_dir is None:
+            return
+            
+        # Clear previous visualization buffer
+        self.vis_buffer.clear()
+        
+        # Group eval results by image
+        eval_by_img = defaultdict(list)
+        for eval_img in eval_imgs:
+            if eval_img is None:
+                continue
+            eval_by_img[eval_img['image_id']].append(eval_img)
+        
+        # Process each image
+        for img_id, img_evals in eval_by_img.items():
+            img_results = defaultdict(list)  # Store all detections/GTs for this image
+            
+            # Process each category's evaluation for this image
+            for eval_img in img_evals:
+                cat_id = eval_img['category_id']
+                cat_name = self.cocoGt.cats[cat_id]['name'] if self.params.useCats else 'all'
+                max_det = eval_img['maxDet']  # Get maxDet from evaluation results
+                
+                # Get corresponding detections and ground truths
+                if self.params.useCats:
+                    dts = self._dts[img_id, cat_id]
+                    gts = self._gts[img_id, cat_id]
+                else:
+                    dts = [_ for cId in self.params.catIds for _ in self._dts[img_id, cId]]
+                    gts = [_ for cId in self.params.catIds for _ in self._gts[img_id, cId]]
+
+                # Skip if no detections or ground truths
+                if len(dts) == 0 and len(gts) == 0:
+                    continue
+
+                # Sort detections by score and limit to maxDet
+                if len(dts) > max_det:
+                    dts = sorted(dts, key=lambda x: x['score'], reverse=True)[:max_det]
+
+                dt_scores = eval_img['dtScores'][:max_det]  # Limit to maxDet
+                dt_matches = eval_img['dtMatches'][:, :max_det]  # TxD matrix, limited to maxDet
+                dt_ignore = eval_img['dtIgnore'][:, :max_det]    # TxD matrix, limited to maxDet
+                gt_ignore = eval_img['gtIgnore']    # G vector
+                
+                # For each detection, count how many IoU thresholds it's a TP for
+                T = len(self.params.iouThrs)
+                tp_counts = np.zeros(len(dts))
+                
+                for dt_idx in range(len(dts)):
+                    # Count IoU thresholds where this detection is a TP
+                    tp_count = 0
+                    for t in range(T):
+                        if not dt_ignore[t, dt_idx] and dt_matches[t, dt_idx] > 0:
+                            tp_count += 1
+                    tp_counts[dt_idx] = tp_count
+
+                # A detection is considered TP if it's TP for at least half of IoU thresholds
+                for dt_idx, (dt, score, tp_count) in enumerate(zip(dts, dt_scores, tp_counts)):
+                    is_tp = tp_count >= T/2  # TP if matched for majority of IoU thresholds
+                    if is_tp:
+                        img_results['detections'].append({
+                            'bbox': dt['bbox'],
+                            'score': score,
+                            'category': cat_name,
+                            'type': 'TP' if is_tp else 'FP'
+                        })
+                
+                # For ground truths, they're FN if they're unmatched at IoU ≥ 0.5
+                gt_matches = eval_img['gtMatches'][0]  # Use IoU=0.5 threshold for FN
+                for gt_idx, (gt, match, ignore) in enumerate(zip(gts, gt_matches, gt_ignore)):
+                    if ignore:
+                        continue
+                        
+                    if match == 0:  # Unmatched GT = False Negative
+                        img_results['groundtruths'].append({
+                            'bbox': gt['bbox'],
+                            'category': cat_name,
+                            'type': 'FN'
+                        })
+            
+            # Draw visualization for this image
+            if len(img_results['detections']) > 0 or len(img_results['groundtruths']) > 0:
+                self._draw_image(img_id, img_results)
+
+    def _draw_image(self, img_id, results):
+        """Helper method to draw detections on an image"""
+        # Load image
+        img_path = self.os.path.join(self.img_dir, f"{int(img_id):012d}.jpg")
+        if not self.os.path.exists(img_path):
+            print(f"Warning: Image {img_path} not found")
+            return
+            
+        img = self.cv2.imread(img_path)
+        if img is None:
+            print(f"Warning: Could not read image {img_path}")
+            return
+
+        # Colors for visualization (BGR format)
+        colors = {
+            'TP': (0, 255, 0),    # Green
+            'FP': (0, 0, 255),    # Red
+            'FN': (255, 0, 0)     # Blue
+        }
+        
+        thickness = 1
+        font = self.cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+
+        # Draw all results for this image
+        all_results = results['detections'] + results['groundtruths']
+        for result in all_results:
+            bbox = result['bbox']
+            x, y, w, h = [int(b) for b in bbox]
+            
+            color = colors[result['type']]
+            
+            # Draw bbox
+            self.cv2.rectangle(img, (x, y), (x + w, y + h), color, thickness)
+            
+            # Prepare label
+            if result['type'] in ['TP', 'FP']:
+                label = f"{result['type']} {result['category']} {result['score']:.2f}"
+            else:  # FN
+                label = f"{result['type']} {result['category']}"
+                
+            # Draw label with background for better visibility
+            (label_w, label_h), baseline = self.cv2.getTextSize(label, font, font_scale, thickness)
+            # self.cv2.rectangle(img, (x, y - label_h - baseline - 5), (x + label_w, y), color, -1)
+            self.cv2.putText(img, label, (x, y - baseline - 5),
+                        font, font_scale, color, thickness)
+
+        # Save visualization
+        save_dir = self.os.path.join('eval_vis')
+        self.os.makedirs(save_dir, exist_ok=True)
+        save_path = self.os.path.join(save_dir, f"{int(img_id):012d}_debug.jpg")
+        self.cv2.imwrite(save_path, img)
 
     def _prepare(self):
         '''
@@ -157,7 +307,13 @@ class COCOeval:
                  for areaRng in p.areaRng
                  for imgId in p.imgIds
              ]
+
         self._paramsEval = copy.deepcopy(self.params)
+
+        # Create debug visualizations after evaluation is complete
+        if self.debug_vis:
+            self._visualize_debug(self.evalImgs)
+        
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format(toc-tic))
 
@@ -295,6 +451,7 @@ class COCOeval:
                     dtIg[tind,dind] = gtIg[m]
                     dtm[tind,dind]  = gt[m]['id']
                     gtm[tind,m]     = d['id']
+
         # set unmatched detections outside of area range to ignore
         a = np.array([d['area']<aRng[0] or d['area']>aRng[1] for d in dt]).reshape((1, len(dt)))
         dtIg = np.logical_or(dtIg, np.logical_and(dtm==0, np.repeat(a,T,0)))
@@ -509,7 +666,7 @@ class Params:
         self.maxDets = [1, 10, 100]
         self.areaRng = [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]]
         self.areaRngLbl = ['all', 'small', 'medium', 'large']
-        self.useCats = 1
+        self.useCats = 0
 
     def setKpParams(self):
         self.imgIds = []
@@ -520,7 +677,7 @@ class Params:
         self.maxDets = [20]
         self.areaRng = [[0 ** 2, 1e5 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]]
         self.areaRngLbl = ['all', 'medium', 'large']
-        self.useCats = 1
+        self.useCats = 0
         self.kpt_oks_sigmas = np.array([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62,.62, 1.07, 1.07, .87, .87, .89, .89])/10.0
 
     def __init__(self, iouType='segm'):
