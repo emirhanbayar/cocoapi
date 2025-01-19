@@ -39,7 +39,7 @@ def main():
 
     # Run evaluation
     print("Running evaluation...")
-    coco_eval.params.useCats = 0  # Evaluate all categories
+    coco_eval.params.useCats = 1  # Evaluate all categories
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.summarize()
