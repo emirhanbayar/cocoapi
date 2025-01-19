@@ -161,6 +161,16 @@ class COCOeval:
                 #             'category': cat_name,
                 #             'type': 'TP' if is_tp else 'FP'
                 #         })
+
+                # MArk predictions as TP if they are TP for IoU >= 0.5
+                for dt_idx, (dt, score) in enumerate(zip(dts, dt_scores)):
+                    if not dt_ignore[0, dt_idx] and dt_matches[0, dt_idx] > 0:
+                        img_results['detections'].append({
+                            'bbox': dt['bbox'],
+                            'score': score,
+                            'category': cat_name,
+                            'type': 'TP'
+                        })
                 
                 # For ground truths, they're FN if they're unmatched at IoU ≥ 0.5
                 gt_matches = eval_img['gtMatches'][0]  # Use IoU=0.5 threshold for FN
@@ -179,371 +189,6 @@ class COCOeval:
             if len(img_results['detections']) > 0 or len(img_results['groundtruths']) > 0:
                 self._draw_image(img_id, img_results)
 
-    def _visualize_matches(self, eval_imgs):
-        """
-        Create visualizations showing each TP detection with its matched ground truth.
-        Each TP-GT pair gets its own image.
-        """
-        if not self.debug_vis or self.img_dir is None:
-            return
-            
-        # Process each evaluation result
-        for eval_img in eval_imgs:
-            if eval_img is None:
-                continue
-                
-            img_id = eval_img['image_id']
-            cat_id = eval_img['category_id']
-            
-            # Get category name
-            cat_name = self.cocoGt.cats[cat_id]['name'] if self.params.useCats else 'all'
-            
-            # Get corresponding detections and ground truths
-            if self.params.useCats:
-                dts = self._dts[img_id, cat_id]
-                gts = self._gts[img_id, cat_id]
-            else:
-                dts = [_ for cId in self.params.catIds for _ in self._dts[img_id, cId]]
-                gts = [_ for cId in self.params.catIds for _ in self._gts[img_id, cId]]
-                
-            max_det = eval_img['maxDet']
-            if len(dts) > max_det:
-                dts = sorted(dts, key=lambda x: x['score'], reverse=True)[:max_det]
-                
-            # Get evaluation matrices
-            dt_matches = eval_img['dtMatches']  # TxD matrix
-            dt_scores = eval_img['dtScores'][:max_det]  # D vector
-            dt_ignore = eval_img['dtIgnore']    # TxD matrix
-            gt_ignore = eval_img['gtIgnore']    # G vector
-
-            T = len(self.params.iouThrs)  # Number of IoU thresholds
-            
-            # For each detection, check if it's a TP
-            for dt_idx, (dt, score) in enumerate(zip(dts, dt_scores)):
-                # Count IoU thresholds where this detection is a TP
-                tp_count = 0
-                matched_gt_ids = set()  # Store matched GT ids for this detection
-                
-                for t in range(T):
-                    if not dt_ignore[t, dt_idx]:  # If detection should not be ignored
-                        gt_match = dt_matches[t, dt_idx]
-                        if gt_match > 0:  # If matched to a GT
-                            tp_count += 1
-                            matched_gt_ids.add(int(gt_match))
-                
-                # If detection is TP for majority of IoU thresholds
-                if tp_count >= T/2:
-                    # Load image
-                    img_path = self.os.path.join(self.img_dir, f"{int(img_id):012d}.jpg")
-                    if not self.os.path.exists(img_path):
-                        print(f"Warning: Image {img_path} not found")
-                        continue
-                        
-                    img = self.cv2.imread(img_path)
-                    if img is None:
-                        print(f"Warning: Could not read image {img_path}")
-                        continue
-
-                    # For each GT this detection matched with
-                    for gt_id in matched_gt_ids:
-                        # Find the GT object
-                        matched_gt = None
-                        for gt in gts:
-                            if gt['id'] == gt_id:
-                                matched_gt = gt
-                                break
-                                
-                        if matched_gt is None:
-                            continue
-                            
-                        # Create a copy of the image for this match
-                        img_match = img.copy()
-                        
-                        # Colors for visualization (BGR format)
-                        dt_color = (0, 255, 0)  # Green for detection
-                        gt_color = (255, 0, 0)  # Blue for ground truth
-                        
-                        # Draw detection
-                        dt_bbox = [int(b) for b in dt['bbox']]
-                        x, y, w, h = dt_bbox
-                        self.cv2.rectangle(img_match, (x, y), (x + w, y + h), dt_color, 2)
-                        dt_label = f"DT {cat_name} {score:.2f}"
-                        self.cv2.putText(img_match, dt_label, (x, y - 5),
-                                    self.cv2.FONT_HERSHEY_SIMPLEX, 0.5, dt_color, 1)
-                        
-                        # Draw ground truth
-                        gt_bbox = [int(b) for b in matched_gt['bbox']]
-                        x, y, w, h = gt_bbox
-                        self.cv2.rectangle(img_match, (x, y), (x + w, y + h), gt_color, 2)
-                        gt_label = f"GT {cat_name}"
-                        self.cv2.putText(img_match, gt_label, (x, y - 20),
-                                    self.cv2.FONT_HERSHEY_SIMPLEX, 0.5, gt_color, 1)
-                        
-                        # Save visualization
-                        save_dir = self.os.path.join('eval_vis', 'matches')
-                        self.os.makedirs(save_dir, exist_ok=True)
-                        save_path = self.os.path.join(save_dir, 
-                            f"{int(img_id):012d}_cat{cat_id}_dt{dt['id']}_gt{gt_id}.jpg")
-                        self.cv2.imwrite(save_path, img_match)
-
-    def analyze_matches(self, eval_imgs):
-        """
-        Analyze cases where a single detection matches multiple ground truths
-        when useCats=1 but can't when useCats=0
-        """
-        dt_to_gts = defaultdict(list)  # Detection -> list of matched GTs
-        multi_matches = []  # Store cases where one detection matches multiple GTs
-        
-        # Process each evaluation result
-        for eval_img in eval_imgs:
-            if eval_img is None:
-                continue
-                
-            img_id = eval_img['image_id']
-            cat_id = eval_img['category_id']
-            
-            # Get detections and ground truths
-            if self.params.useCats:
-                dts = self._dts[img_id, cat_id]
-                gts = self._gts[img_id, cat_id]
-            else:
-                dts = [_ for cId in self.params.catIds for _ in self._dts[img_id, cId]]
-                gts = [_ for cId in self.params.catIds for _ in self._gts[img_id, cId]]
-                
-            max_det = eval_img['maxDet']
-            if len(dts) > max_det:
-                dts = sorted(dts, key=lambda x: x['score'], reverse=True)[:max_det]
-                
-            dt_matches = eval_img['dtMatches']  # TxD matrix
-            dt_scores = eval_img['dtScores'][:max_det]
-            dt_ignore = eval_img['dtIgnore']
-            gt_ignore = eval_img['gtIgnore']
-            
-            T = len(self.params.iouThrs)
-            
-            # For each detection
-            for dt_idx, (dt, score) in enumerate(zip(dts, dt_scores)):
-                matched_gts = set()
-                
-                # Check matches across IoU thresholds
-                for t in range(T):
-                    if not dt_ignore[t, dt_idx]:
-                        gt_match = dt_matches[t, dt_idx]
-                        if gt_match > 0:
-                            matched_gts.add(int(gt_match))
-                
-                # If this detection matched multiple GTs
-                if len(matched_gts) > 1:
-                    matched_gt_info = []
-                    # Get IoUs with all matched GTs
-                    for gt_id in matched_gts:
-                        matched_gt = None
-                        for gt in gts:
-                            if gt['id'] == gt_id:
-                                matched_gt = gt
-                                break
-                        
-                        if matched_gt:
-                            # Compute IoU between detection and GT
-                            dt_bbox = dt['bbox']
-                            gt_bbox = matched_gt['bbox']
-                            
-                            # Simple IoU computation for bboxes
-                            def compute_iou(bbox1, bbox2):
-                                x1, y1, w1, h1 = bbox1
-                                x2, y2, w2, h2 = bbox2
-                                
-                                # Convert to x1,y1,x2,y2 format
-                                box1 = [x1, y1, x1+w1, y1+h1]
-                                box2 = [x2, y2, x2+w2, y2+h2]
-                                
-                                # Intersection
-                                xi1 = max(box1[0], box2[0])
-                                yi1 = max(box1[1], box2[1])
-                                xi2 = min(box1[2], box2[2])
-                                yi2 = min(box1[3], box2[3])
-                                
-                                inter_area = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-                                
-                                # Union
-                                box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-                                box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-                                union_area = box1_area + box2_area - inter_area
-                                
-                                return inter_area / union_area if union_area > 0 else 0
-                            
-                            iou = compute_iou(dt_bbox, gt_bbox)
-                            
-                            matched_gt_info.append({
-                                'gt_id': gt_id,
-                                'category_id': matched_gt.get('category_id'),
-                                'iou': iou
-                            })
-                    
-                    if matched_gt_info:
-                        multi_matches.append({
-                            'img_id': img_id,
-                            'dt_id': dt['id'],
-                            'dt_score': score,
-                            'dt_category': dt.get('category_id'),
-                            'matches': matched_gt_info
-                        })
-        
-        # Print analysis
-        if multi_matches:
-            print(f"\nFound {len(multi_matches)} cases where a detection matches multiple ground truths:")
-            for case in multi_matches:
-                print(f"\nImage {case['img_id']}, Detection {case['dt_id']} (score: {case['dt_score']:.3f}, category: {case['dt_category']}):")
-                for match in case['matches']:
-                    print(f"  Matched GT {match['gt_id']} (category: {match['category_id']}) with IoU {match['iou']:.3f}")
-        else:
-            print("\nNo cases found where a detection matches multiple ground truths")
-
-        return multi_matches
-    
-    def _visualize_multi_matches(self, eval_imgs):
-        """
-        Create visualizations highlighting detections that match multiple ground truths.
-        Colors:
-        - Regular TPs: Green
-        - Regular GTs: Blue
-        - Multi-match detection: Yellow
-        - GTs matched by multi-match detection: Purple
-        """
-        if not self.debug_vis or self.img_dir is None:
-            return
-            
-        # First run the match analysis to find multi-match cases
-        multi_matches = self.analyze_matches(eval_imgs)
-        
-        # Group multi-matches by image
-        multi_match_by_img = defaultdict(list)
-        for match in multi_matches:
-            multi_match_by_img[match['img_id']].append(match)
-        
-        # Process each evaluation result
-        for eval_img in eval_imgs:
-            if eval_img is None:
-                continue
-                
-            img_id = eval_img['image_id']
-            cat_id = eval_img['category_id']
-            
-            # Skip if no multi-matches for this image
-            if img_id not in multi_match_by_img:
-                continue
-                
-            # Get detections and ground truths
-            if self.params.useCats:
-                dts = self._dts[img_id, cat_id]
-                gts = self._gts[img_id, cat_id]
-            else:
-                dts = [_ for cId in self.params.catIds for _ in self._dts[img_id, cId]]
-                gts = [_ for cId in self.params.catIds for _ in self._gts[img_id, cId]]
-                
-            max_det = eval_img['maxDet']
-            if len(dts) > max_det:
-                dts = sorted(dts, key=lambda x: x['score'], reverse=True)[:max_det]
-                
-            dt_matches = eval_img['dtMatches']
-            dt_scores = eval_img['dtScores'][:max_det]
-            dt_ignore = eval_img['dtIgnore']
-            gt_ignore = eval_img['gtIgnore']
-            
-            # Load image
-            img_path = self.os.path.join(self.img_dir, f"{int(img_id):012d}.jpg")
-            if not self.os.path.exists(img_path):
-                print(f"Warning: Image {img_path} not found")
-                continue
-                
-            img = self.cv2.imread(img_path)
-            if img is None:
-                print(f"Warning: Could not read image {img_path}")
-                continue
-                
-            # Colors (BGR format)
-            colors = {
-                'tp': (0, 255, 0),      # Green
-                'gt': (255, 0, 0),      # Blue
-                'multi': (0, 255, 255),  # Yellow
-                'matched': (255, 0, 255) # Purple
-            }
-            
-            # Get multi-match detections and their matched GTs for this image
-            multi_match_dts = {m['dt_id']: m for m in multi_match_by_img[img_id]}
-            multi_match_gts = set()
-            for match in multi_match_by_img[img_id]:
-                for gt_match in match['matches']:
-                    multi_match_gts.add(gt_match['gt_id'])
-            
-            # Draw all detections and ground truths
-            font = self.cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.5
-            thickness = 2
-            
-            # First draw regular TPs and GTs
-            T = len(self.params.iouThrs)
-            for dt_idx, (dt, score) in enumerate(zip(dts, dt_scores)):
-                if dt['id'] in multi_match_dts:
-                    continue  # Skip multi-match detections for now
-                    
-                # Check if it's a TP
-                tp_count = 0
-                for t in range(T):
-                    if not dt_ignore[t, dt_idx] and dt_matches[t, dt_idx] > 0:
-                        tp_count += 1
-                
-                if tp_count >= T/2:  # If TP for majority of thresholds
-                    bbox = [int(b) for b in dt['bbox']]
-                    x, y, w, h = bbox
-                    self.cv2.rectangle(img, (x, y), (x + w, y + h), colors['tp'], thickness)
-                    label = f"TP {score:.2f}"
-                    self.cv2.putText(img, label, (x, y - 5), font, font_scale, colors['tp'], thickness)
-            
-            # Draw ground truths that aren't part of multi-matches
-            for gt in gts:
-                if gt['id'] in multi_match_gts:
-                    continue  # Skip multi-match GTs for now
-                    
-                if not gt['ignore']:
-                    bbox = [int(b) for b in gt['bbox']]
-                    x, y, w, h = bbox
-                    self.cv2.rectangle(img, (x, y), (x + w, y + h), colors['gt'], thickness)
-                    label = "GT"
-                    self.cv2.putText(img, label, (x, y - 5), font, font_scale, colors['gt'], thickness)
-            
-            # Now draw multi-match detections and their matched GTs
-            for match in multi_match_by_img[img_id]:
-                # Draw the detection in yellow
-                dt = None
-                for d in dts:
-                    if d['id'] == match['dt_id']:
-                        dt = d
-                        break
-                        
-                if dt:
-                    bbox = [int(b) for b in dt['bbox']]
-                    x, y, w, h = bbox
-                    self.cv2.rectangle(img, (x, y), (x + w, y + h), colors['multi'], thickness)
-                    label = f"Multi {match['dt_score']:.2f}"
-                    self.cv2.putText(img, label, (x, y - 5), font, font_scale, colors['multi'], thickness)
-                    
-                    # Draw matched GTs in purple
-                    for gt_match in match['matches']:
-                        for gt in gts:
-                            if gt['id'] == gt_match['gt_id']:
-                                bbox = [int(b) for b in gt['bbox']]
-                                x, y, w, h = bbox
-                                self.cv2.rectangle(img, (x, y), (x + w, y + h), colors['matched'], thickness)
-                                label = f"Matched GT ({gt_match['iou']:.2f})"
-                                self.cv2.putText(img, label, (x, y - 5), font, font_scale, colors['matched'], thickness)
-            
-            # Save visualization
-            save_dir = self.os.path.join('eval_vis', 'multi_matches')
-            self.os.makedirs(save_dir, exist_ok=True)
-            save_path = self.os.path.join(save_dir, f"{int(img_id):012d}_multi_match.jpg")
-            self.cv2.imwrite(save_path, img)
-
     def _draw_image(self, img_id, results):
         """Helper method to draw detections on an image"""
         # Load image
@@ -561,7 +206,7 @@ class COCOeval:
         colors = {
             'TP': (0, 255, 0),    # Green
             'FP': (0, 0, 255),    # Red
-            'FN': (255, 0, 0)     # Blue
+            'FN': (0, 0, 255)     # Blue
         }
         
         thickness = 1
@@ -679,8 +324,8 @@ class COCOeval:
         if self.debug_vis:
             self._visualize_debug(self.evalImgs)
             # self._visualize_matches(self.evalImgs)
-            self._visualize_multi_matches(self.evalImgs)
-            self.analyze_matches(self.evalImgs)
+            # self._visualize_multi_matches(self.evalImgs)
+            # self.analyze_matches(self.evalImgs)
         
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format(toc-tic))
