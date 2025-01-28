@@ -163,20 +163,23 @@ class COCOeval:
                 #         })
 
                 # MArk predictions as TP if they are TP for IoU >= 0.5
-                for dt_idx, (dt, score) in enumerate(zip(dts, dt_scores)):
-                    if not dt_ignore[0, dt_idx] and dt_matches[0, dt_idx] > 0:
-                        img_results['detections'].append({
-                            'bbox': dt['bbox'],
-                            'score': score,
-                            'category': cat_name,
-                            'type': 'TP'
-                        })
+                # for dt_idx, (dt, score) in enumerate(zip(dts, dt_scores)):
+                #     if not dt_ignore[0, dt_idx] and dt_matches[0, dt_idx] > 0:
+                #         img_results['detections'].append({
+                #             'bbox': dt['bbox'],
+                #             'score': score,
+                #             'category': cat_name,
+                #             'type': 'TP'
+                #         })
                 
                 # For ground truths, they're FN if they're unmatched at IoU ≥ 0.5
                 gt_matches = eval_img['gtMatches'][0]  # Use IoU=0.5 threshold for FN
+                # print()
                 for gt_idx, (gt, match, ignore) in enumerate(zip(gts, gt_matches, gt_ignore)):
                     if ignore:
                         continue
+
+                    # print(f"img_id: {img_id}, gt_idx: {gt_idx}, match: {match}")
                         
                     if match == 0:  # Unmatched GT = False Negative
                         img_results['groundtruths'].append({
@@ -184,6 +187,13 @@ class COCOeval:
                             'category': cat_name,
                             'type': 'FN'
                         })
+
+                    # else:  # Matched GT = True Positive
+                    #     img_results['groundtruths'].append({
+                    #         'bbox': gt['bbox'],
+                    #         'category': cat_name,
+                    #         'type': 'GT'
+                    #     })
             
             # Draw visualization for this image
             if len(img_results['detections']) > 0 or len(img_results['groundtruths']) > 0:
@@ -205,8 +215,8 @@ class COCOeval:
         # Colors for visualization (BGR format)
         colors = {
             'TP': (0, 255, 0),    # Green
-            'FP': (0, 0, 255),    # Red
-            'FN': (0, 0, 255)     # Blue
+            'FN': (0, 0, 255),     # Red 
+            'GT': (255, 0, 0)     # Blue
         }
         
         thickness = 1
@@ -237,7 +247,7 @@ class COCOeval:
                         font, font_scale, color, thickness)
 
         # Save visualization
-        save_dir = self.os.path.join('eval_vis')
+        save_dir = self.os.path.join('eval_vis_class_agnostic')
         self.os.makedirs(save_dir, exist_ok=True)
         save_path = self.os.path.join(save_dir, f"{int(img_id):012d}_debug.jpg")
         self.cv2.imwrite(save_path, img)
@@ -312,6 +322,7 @@ class COCOeval:
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
+        p.areaRng = p.areaRng
         self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet)
                  for catId in catIds
                  for areaRng in p.areaRng
@@ -628,19 +639,22 @@ class COCOeval:
             return mean_s
         def _summarizeDets():
             stats = np.zeros((13,))
-            stats[0] = _summarize(1)
-            stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
-            stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
-            stats[3] = _summarize(1, areaRng='small', maxDets=self.params.maxDets[2])
-            stats[4] = _summarize(1, areaRng='medium', maxDets=self.params.maxDets[2])
-            stats[5] = _summarize(1, areaRng='large', maxDets=self.params.maxDets[2])
-            stats[6] = _summarize(0, maxDets=self.params.maxDets[0])
-            stats[7] = _summarize(0, maxDets=self.params.maxDets[1])
-            stats[8] = _summarize(0, maxDets=self.params.maxDets[2])
-            stats[9] = _summarize(0, maxDets=self.params.maxDets[3])
-            stats[10] = _summarize(0, areaRng='small', maxDets=self.params.maxDets[2])
-            stats[11] = _summarize(0, areaRng='medium', maxDets=self.params.maxDets[2])
-            stats[12] = _summarize(0, areaRng='large', maxDets=self.params.maxDets[2])
+            # stats[0] = _summarize(1,maxDets=self.params.maxDets[2])
+            # stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
+            # stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
+            stats[0] = _summarize(1, iouThr=.5, areaRng='small', maxDets=self.params.maxDets[2])
+            stats[1] = _summarize(1, iouThr=.5, areaRng='medium', maxDets=self.params.maxDets[2])
+            stats[2] = _summarize(1, iouThr=.5, areaRng='large', maxDets=self.params.maxDets[2])
+            # stats[6] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[0])
+            # stats[7] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[1])
+            # stats[8] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[2])
+            # stats[3] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[2])
+            # stats[4] = _summarize(0, iouThr=.75, maxDets=self.params.maxDets[2])
+            # stats[5] = _summarize(0, iouThr=.95, maxDets=self.params.maxDets[2])
+            # stats[6] = _summarize(0, maxDets=self.params.maxDets[2])
+            stats[3] = _summarize(0, iouThr=.5, areaRng='small', maxDets=self.params.maxDets[2])
+            stats[4] = _summarize(0, iouThr=.5, areaRng='medium', maxDets=self.params.maxDets[2])
+            stats[5] = _summarize(0, iouThr=.5, areaRng='large', maxDets=self.params.maxDets[2])
             return stats
         def _summarizeKps():
             stats = np.zeros((10,))

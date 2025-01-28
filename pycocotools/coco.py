@@ -49,7 +49,10 @@ import time
 import numpy as np
 import copy
 import itertools
-from . import mask as maskUtils
+try:
+    from . import mask as maskUtils
+except:
+    maskUtils = None
 import os
 from collections import defaultdict
 import sys
