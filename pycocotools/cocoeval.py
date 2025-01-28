@@ -188,12 +188,12 @@ class COCOeval:
                             'type': 'FN'
                         })
 
-                    # else:  # Matched GT = True Positive
-                    #     img_results['groundtruths'].append({
-                    #         'bbox': gt['bbox'],
-                    #         'category': cat_name,
-                    #         'type': 'GT'
-                    #     })
+                    else:  # Matched GT = True Positive
+                        img_results['groundtruths'].append({
+                            'bbox': gt['bbox'],
+                            'category': cat_name,
+                            'type': 'GT'
+                        })
             
             # Draw visualization for this image
             if len(img_results['detections']) > 0 or len(img_results['groundtruths']) > 0:
@@ -639,22 +639,22 @@ class COCOeval:
             return mean_s
         def _summarizeDets():
             stats = np.zeros((13,))
-            # stats[0] = _summarize(1,maxDets=self.params.maxDets[2])
-            # stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
-            # stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
-            stats[0] = _summarize(1, iouThr=.5, areaRng='small', maxDets=self.params.maxDets[2])
-            stats[1] = _summarize(1, iouThr=.5, areaRng='medium', maxDets=self.params.maxDets[2])
-            stats[2] = _summarize(1, iouThr=.5, areaRng='large', maxDets=self.params.maxDets[2])
+            stats[0] = _summarize(1,maxDets=self.params.maxDets[2])
+            stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
+            stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
+            # stats[0] = _summarize(1, iouThr=.5, areaRng='small', maxDets=self.params.maxDets[2])
+            # stats[1] = _summarize(1, iouThr=.5, areaRng='medium', maxDets=self.params.maxDets[2])
+            # stats[2] = _summarize(1, iouThr=.5, areaRng='large', maxDets=self.params.maxDets[2])
             # stats[6] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[0])
             # stats[7] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[1])
             # stats[8] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[2])
-            # stats[3] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[2])
-            # stats[4] = _summarize(0, iouThr=.75, maxDets=self.params.maxDets[2])
-            # stats[5] = _summarize(0, iouThr=.95, maxDets=self.params.maxDets[2])
-            # stats[6] = _summarize(0, maxDets=self.params.maxDets[2])
-            stats[3] = _summarize(0, iouThr=.5, areaRng='small', maxDets=self.params.maxDets[2])
-            stats[4] = _summarize(0, iouThr=.5, areaRng='medium', maxDets=self.params.maxDets[2])
-            stats[5] = _summarize(0, iouThr=.5, areaRng='large', maxDets=self.params.maxDets[2])
+            stats[3] = _summarize(0, iouThr=.5, maxDets=self.params.maxDets[2])
+            stats[4] = _summarize(0, iouThr=.75, maxDets=self.params.maxDets[2])
+            stats[5] = _summarize(0, iouThr=.95, maxDets=self.params.maxDets[2])
+            stats[6] = _summarize(0, maxDets=self.params.maxDets[2])
+            # stats[3] = _summarize(0, iouThr=.5, areaRng='small', maxDets=self.params.maxDets[2])
+            # stats[4] = _summarize(0, iouThr=.5, areaRng='medium', maxDets=self.params.maxDets[2])
+            # stats[5] = _summarize(0, iouThr=.5, areaRng='large', maxDets=self.params.maxDets[2])
             return stats
         def _summarizeKps():
             stats = np.zeros((10,))
