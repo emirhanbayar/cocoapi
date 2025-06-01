@@ -8,12 +8,17 @@ import os
 # === Configuration ===
 # Update these paths accordingly
 # ground_truth_path = '/home/emirhan/datasets/object_detection/coco/annotations/instances_val2017.json'  # Path to COCO ground truth annotations
-# predictions_path = '/home/emirhan/DINO-experiments/logs/DINO/ARMAX/predictions.json'         # Path to your predictions.json file
+# predictions_path = '/home/emirhan/DINO-GT-Cheat/logs/DINO/R50-MS4-%j/predictions_original.json'         # Path to your predictions.json file
 
-ground_truth_path = '/home/emirhan/datasets/object_detection/coco-mini-class-agnostic/annotations/instances_val2017.json'
-predictions_path = '/home/emirhan/DINO-GT-Cheat/predictions.json'
+# ground_truth_path = '/home/emirhan/datasets/object_detection/coco/annotations/instances_val2017.json'
+# predictions_path = '/home/emirhan/Deformable-DETR/logs_original/predictions.json'
 
-img_dir = '/home/emirhan/datasets/object_detection/coco/val2017'
+# img_dir = '/home/emirhan/datasets/object_detection/coco/val2017'
+
+ground_truth_path = '/home/emirhan/datasets/object_detection/FLIR_ADAS_IR/annotations/instances_val2017_remapped.json'
+predictions_path = '/home/emirhan/DINO_RGB_IR/logs/DINO/R50-MS4-RGB/predictions.json'
+img_dir = '/home/emirhan/datasets/object_detection/FLIR_ADAS_RGB/val2017/'
+
 # =====================
 # =====================
 
@@ -43,7 +48,6 @@ def main():
     # Run evaluation
     print("Running evaluation...")
     coco_eval.params.useCats = 1  # Evaluate all categories
-    # coco_eval.params.imgIds = [139]
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.summarize()
